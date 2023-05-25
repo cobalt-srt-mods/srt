@@ -500,6 +500,11 @@ void FECFilterBuiltin::ClipRebuiltPacket(Group& g, Receive::PrivPacket& pkt)
 void FECFilterBuiltin::ClipData(Group& g, uint16_t length_net, uint8_t kflg,
         uint32_t timestamp_hw, const char* payload, size_t payload_size)
 {
+	size_t clip_size = g.payload_clip.size();
+	if (payload_size > clip_size)
+	{
+		payload_size = clip_size;
+	}
     g.length_clip = g.length_clip ^ length_net;
     g.flag_clip = g.flag_clip ^ kflg;
     g.timestamp_clip = g.timestamp_clip ^ timestamp_hw;
