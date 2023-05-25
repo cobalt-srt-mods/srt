@@ -1431,7 +1431,7 @@ void FECFilterBuiltin::RcvRebuild(Group& g, int32_t seqno, Group::Type tp)
 int FECFilterBuiltin::ExtendRows(int rowx)
 {
     // Check if oversize. Oversize is when the
-    // index is > 2*m_number_cols. If so, shrink
+    // index is > 3*m_number_rows. If so, shrink
     // the container first.
 
 #if ENABLE_HEAVY_LOGGING
@@ -1442,27 +1442,26 @@ int FECFilterBuiltin::ExtendRows(int rowx)
 #endif
 
     int32_t base = rcv.rowq[0].base; // Conservative base when colq not filled appropriately
-    if (rowx > int(m_number_cols*3))
+    if (rowx > int(m_number_rows*3))
     {
         LOGC(pflog.Warn, log << "FEC/H: OFFSET=" << rowx << " exceeds maximum row container size, SHRINKING rows and cells."
         		" rowq size=" << rcv.rowq.size());
 
         size_t nerase_rows = rcv.rowq.size();
-        if (m_number_cols < nerase_rows)
+        if (m_number_rows < nerase_rows)
         {
-        	nerase_rows = m_number_cols;
+        	nerase_rows = m_number_rows;
         }
 
         rcv.rowq.erase(rcv.rowq.begin(), rcv.rowq.begin() + nerase_rows);
         rowx -= nerase_rows;
-
-        // With rows, delete also an appropriate number of cells.
-        int nerase = min(int(rcv.cells.size()), CSeqNo::seqoff(rcv.cell_base, rcv.rowq[0].base));
-        rcv.cells.erase(rcv.cells.begin(), rcv.cells.begin() + nerase);
         if (rcv.rowq.size())
         {
         	base = rcv.rowq[0].base;
         }
+        // With rows, delete also an appropriate number of cells.
+        int nerase = min(int(rcv.cells.size()), CSeqNo::seqoff(rcv.cell_base, base));
+        rcv.cells.erase(rcv.cells.begin(), rcv.cells.begin() + nerase);
         rcv.cell_base = base;
     }
 
