@@ -1441,17 +1441,29 @@ int FECFilterBuiltin::ExtendRows(int rowx)
         LOGC(pflog.Debug, log << "... [" << i << "] " << rcv.rowq[i].DisplayStats());
 #endif
 
+    int32_t base = rcv.rowq[0].base; // Conservative base when colq not filled appropriately
     if (rowx > int(m_number_cols*3))
     {
-        LOGC(pflog.Warn, log << "FEC/H: OFFSET=" << rowx << " exceeds maximum row container size, SHRINKING rows and cells");
+        LOGC(pflog.Warn, log << "FEC/H: OFFSET=" << rowx << " exceeds maximum row container size, SHRINKING rows and cells."
+        		" rowq size=" << rcv.rowq.size());
 
-        rcv.rowq.erase(rcv.rowq.begin(), rcv.rowq.begin() + m_number_cols);
-        rowx -= m_number_cols;
+        size_t nerase_rows = rcv.rowq.size();
+        if (m_number_cols < nerase_rows)
+        {
+        	nerase_rows = m_number_cols;
+        }
+
+        rcv.rowq.erase(rcv.rowq.begin(), rcv.rowq.begin() + nerase_rows);
+        rowx -= nerase_rows;
 
         // With rows, delete also an appropriate number of cells.
         int nerase = min(int(rcv.cells.size()), CSeqNo::seqoff(rcv.cell_base, rcv.rowq[0].base));
         rcv.cells.erase(rcv.cells.begin(), rcv.cells.begin() + nerase);
-        rcv.cell_base = rcv.rowq[0].base;
+        if (rcv.rowq.size())
+        {
+        	base = rcv.rowq[0].base;
+        }
+        rcv.cell_base = base;
     }
 
     // Create and configure next groups.
@@ -1464,7 +1476,7 @@ int FECFilterBuiltin::ExtendRows(int rowx)
     for (size_t i = old; i < rcv.rowq.size(); ++i)
     {
         // Initialize the base for the row group
-        int32_t ibase = CSeqNo::incseq(rcv.rowq[0].base, i*m_number_cols);
+        int32_t ibase = CSeqNo::incseq(base, i*m_number_cols);
         ConfigureGroup(rcv.rowq[i], ibase, 1, m_number_cols);
     }
 
@@ -1759,15 +1771,20 @@ void FECFilterBuiltin::RcvCheckDismissColumn(int32_t seq, int colgx, loss_seqs_t
 
         int32_t newbase = rcv.colq[numberCols()].base;
         int32_t newbase_row = rcv.rowq[numberRows()].base;
-        int matrix_size = numberCols() * numberRows();
+        size_t matrix_size = numberCols() * numberRows();
 
         HLOGC(pflog.Debug, log << "FEC/V: DISMISSING " << numberCols() << " COLS. Base %"
                 << rcv.colq[0].base << " -> %" << newbase
                 << " AND " << numberRows() << " ROWS Base %"
                 << rcv.rowq[0].base << " -> %" << newbase_row
-                << " AND " << matrix_size << " cells");
+                << " AND " << matrix_size << " cells, colq size=" << rcv.colq.size());
 
-        rcv.colq.erase(rcv.colq.begin(), rcv.colq.begin() + numberCols());
+        size_t nerase_cols = rcv.colq.size();
+        if (nerase_cols > numberCols())
+        {
+        	nerase_cols = numberCols();
+        }
+        rcv.colq.erase(rcv.colq.begin(), rcv.colq.begin() + nerase_cols);
 
 #if ENABLE_HEAVY_LOGGING
         LOGC(pflog.Debug, log << "FEC: COL STATS BEFORE: n=" << rcv.colq.size());
@@ -1790,8 +1807,13 @@ void FECFilterBuiltin::RcvCheckDismissColumn(int32_t seq, int colgx, loss_seqs_t
         }
         else
         {
+            size_t nerase_rows = rcv.rowq.size();
+            if (nerase_rows > numberRows())
+            {
+            	nerase_rows = numberRows();
+            }
             // Remove "legally" a matrix of rows.
-            rcv.rowq.erase(rcv.rowq.begin(), rcv.rowq.begin() + numberRows());
+            rcv.rowq.erase(rcv.rowq.begin(), rcv.rowq.begin() + nerase_rows);
         }
 
         // And now accordingly remove cells. Exactly one matrix of cells.
@@ -1807,11 +1829,23 @@ void FECFilterBuiltin::RcvCheckDismissColumn(int32_t seq, int colgx, loss_seqs_t
             if (shift < 0)
                 rcv.cells.clear();
             else
-                rcv.cells.erase(rcv.cells.begin(), rcv.cells.begin() + shift);
+            {
+            	size_t nerase = rcv.cells.size();
+            	if (nerase > (size_t)shift)
+            	{
+            		nerase = shift;
+            	}
+            	rcv.cells.erase(rcv.cells.begin(), rcv.cells.begin() + nerase);
+            }
         }
         else
         {
-            rcv.cells.erase(rcv.cells.begin(), rcv.cells.begin() + matrix_size);
+        	size_t nerase_cells = rcv.cells.size();
+        	if (nerase_cells > matrix_size)
+        	{
+        		nerase_cells = matrix_size;
+        	}
+            rcv.cells.erase(rcv.cells.begin(), rcv.cells.begin() + nerase_cells);
         }
         rcv.cell_base = newbase;
         DebugPrintCells(rcv.cell_base, rcv.cells, sizeRow());
@@ -2155,28 +2189,46 @@ int FECFilterBuiltin::RcvGetColumnGroupIndex(int32_t seqno)
 
 int FECFilterBuiltin::ExtendColumns(int colgx)
 {
+	int32_t base = rcv.colq[0].base;
+
     if (colgx > int(sizeRow() * 2))
     {
         // This shouldn't happen because columns should be dismissed
         // once the last row of the first series is closed.
-        LOGC(pflog.Warn, log << "FEC/V: OFFSET=" << colgx << " exceeds maximum col container size, SHRINKING container by " << sizeRow());
+        LOGC(pflog.Warn, log << "FEC/V: OFFSET=" << colgx << " exceeds maximum col container size, SHRINKING container by "
+        		<< sizeRow() << " colq size=" << rcv.colq.size() << " rowq size=" << rcv.rowq.size());
 
-        // Delete one series of columns.
-        int32_t oldbase SRT_ATR_UNUSED = rcv.colq[0].base;
-        rcv.colq.erase(rcv.colq.begin(), rcv.colq.begin() + numberCols());
-        colgx -= numberCols();
-        int32_t newbase = rcv.colq[0].base;
+        // Delete one series of columns.;
+        int32_t oldbase_cols SRT_ATR_UNUSED = rcv.colq[0].base;
+        size_t nerase_cols = rcv.colq.size();
+        if (nerase_cols > numberCols())
+        {
+        	nerase_cols = numberCols();
+        }
+        rcv.colq.erase(rcv.colq.begin(), rcv.colq.begin() + nerase_cols);
+        colgx -= nerase_cols;  // Subtraction result should be positive
+        // Assume new base
+        int32_t newbase_cols = (rcv.colq.size() == 0)?
+        		CSeqNo::incseq ( (oldbase_cols + (numberCols() * numberRows()) )) :
+        		rcv.colq[0].base;
 
+        size_t nerase_rows = rcv.rowq.size();
+        if (nerase_rows > numberRows())
+        {
+        	nerase_rows = numberRows();
+        }
         // Delete also appropriate number of rows for one series
-        rcv.rowq.erase(rcv.rowq.begin(), rcv.rowq.begin() + numberRows());
+        rcv.rowq.erase(rcv.rowq.begin(), rcv.rowq.begin() + nerase_rows);
+        int32_t newbase_rows = (rcv.rowq.size() == 0)?
+        		newbase_cols : rcv.rowq[0].base;
 
         // Sanity-check if the resulting row absolute base is equal to column
-        if (rcv.rowq[0].base != newbase)
+        if (newbase_rows != newbase_cols)
         {
             LOGC(pflog.Error, log << "FEC/V: IPE: removal of " << numberRows()
                     << " rows ships no same seq: rowbase=%"
-                    << rcv.rowq[0].base
-                    << " colbase=%" << oldbase << " -> %" << newbase << " - RESETTING ROWS");
+                    << newbase_rows
+                    << " colbase=%" << oldbase_cols << " -> %" << newbase_cols << " - RESETTING ROWS");
 
             // How much you need, depends on the columns.
             size_t nseries = rcv.colq.size() / numberCols() + 1;
@@ -2184,17 +2236,22 @@ int FECFilterBuiltin::ExtendColumns(int colgx)
 
             rcv.rowq.clear();
             rcv.rowq.resize(needrows);
-            int32_t rowbase = newbase;
+            int32_t rowbase = newbase_cols;
             for (size_t i = 0; i < rcv.rowq.size(); ++i)
             {
                 ConfigureGroup(rcv.rowq[i], rowbase, 1, sizeRow());
-                rowbase = CSeqNo::incseq(newbase, sizeRow());
+                rowbase = CSeqNo::incseq(rowbase, sizeRow());
             }
         }
 
-        size_t ncellrem = CSeqNo::seqoff(rcv.cell_base, newbase);
+        size_t ncellrem = CSeqNo::seqoff(rcv.cell_base, newbase_cols);
+        const size_t cells_size = rcv.cells.size();
+        if (ncellrem > cells_size)
+        {
+        	ncellrem = cells_size;
+        }
         rcv.cells.erase(rcv.cells.begin(), rcv.cells.begin() + ncellrem);
-        rcv.cell_base = newbase;
+        rcv.cell_base = newbase_cols;
 
         // Note that after this shift, column groups that were
         // in particular column, remain in that column.
@@ -2212,7 +2269,11 @@ int FECFilterBuiltin::ExtendColumns(int colgx)
 
     // Now, the base of the series is the base increased by one matrix size.
 
-    int32_t base = rcv.colq[0].base;
+//    int32_t base = rcv.colq[0].base;
+    if (rcv.colq.size())
+    {
+    	base = rcv.colq[0].base;
+    }
 
     // This is the base for series 0, but this procedure must be prepared
     // for that the series will not necessarily be 1, may be greater.
