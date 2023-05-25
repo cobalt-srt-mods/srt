@@ -2627,7 +2627,9 @@ void CUDTUnited::updateMux(
                   && (i->second.m_iIpV6Only == s->m_pUDT->m_iIpV6Only)
                   &&  i->second.m_bReusable)
           {
-            if (i->second.m_iPort == port)
+        	CChannel *pCh = i->second.m_pChannel;
+            if ((i->second.m_iPort == port) && pCh &&
+            		(pCh->bindAddressAny().equal_address(addr)))
             {
                // HLOGF(smlog.Debug, "reusing multiplexer for port
                // %hd\n", port);
