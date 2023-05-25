@@ -3387,15 +3387,18 @@ bool CUDT::checkApplyFilterConfig(const std::string &confstr)
     // Now parse your own string, if you have it.
     if (m_OPT_PktFilterConfigString != "")
     {
-        // - for rendezvous, both must be exactly the same, or only one side specified.
-        if (m_bRendezvous && m_OPT_PktFilterConfigString != confstr)
-        {
-            return false;
-        }
+    	SrtFilterConfig mycfg;
+    	if (!ParseFilterConfig(m_OPT_PktFilterConfigString, mycfg))
+    		return false;
 
-        SrtFilterConfig mycfg;
-        if (!ParseFilterConfig(m_OPT_PktFilterConfigString, mycfg))
-            return false;
+    	// - for rendezvous, both must be exactly the same, or only one side specified.
+    	if (m_bRendezvous)
+    	{
+    		if (mycfg.parameters != cfg.parameters)
+    		{
+    			return false;
+    		}
+    	}
 
         // Check only if both have set a filter of the same type.
         if (mycfg.type != cfg.type)
